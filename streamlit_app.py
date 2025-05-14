@@ -1,56 +1,77 @@
 import streamlit as st
+import pandas as pd
 from openai import OpenAI
 
-# Show title and description.
-st.title("💬 Chatbot")
+# Título y descripción
+st.title("🔍 Chatbot Analista de Datos")
 st.write(
-    "This is a simple chatbot that uses OpenAI's GPT-3.5 model to generate responses. "
-    "To use this app, you need to provide an OpenAI API key, which you can get [here](https://platform.openai.com/account/api-keys). "
-    "You can also learn how to build this app step by step by [following our tutorial](https://docs.streamlit.io/develop/tutorials/llms/build-conversational-apps)."
+    "Este chatbot utiliza un modelo de OpenAI para responder preguntas relacionadas con un dataset de consumo de combustible. "
+    "Proporcione su clave de API de OpenAI para comenzar. Puede obtenerla [aquí](https://platform.openai.com/account/api-keys)."
 )
 
-# Ask user for their OpenAI API key via `st.text_input`.
-# Alternatively, you can store the API key in `./.streamlit/secrets.toml` and access it
-# via `st.secrets`, see https://docs.streamlit.io/develop/concepts/connections/secrets-management
-openai_api_key = st.text_input("OpenAI API Key", type="password")
+# Entrada para la API Key
+openai_api_key = st.text_input("🔑 Clave de API de OpenAI", type="password")
 if not openai_api_key:
-    st.info("Please add your OpenAI API key to continue.", icon="🗝️")
-else:
+    st.info("Por favor ingresa tu clave de API para continuar.", icon="🗝️")
+    st.stop()
 
-    # Create an OpenAI client.
-    client = OpenAI(api_key=openai_api_key)
+# Crear cliente de OpenAI
+client = OpenAI(api_key=openai_api_key)
 
-    # Create a session state variable to store the chat messages. This ensures that the
-    # messages persist across reruns.
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+# Cargar dataset
+@st.cache_data
+def load_data():
+    try:
+        df = pd.read_csv("FuelConsumption (1).csv")
+        return df
+    except Exception as e:
+        st.error(f"No se pudo cargar el dataset: {e}")
+        return None
 
-    # Display the existing chat messages via `st.chat_message`.
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+df = load_data()
+if df is None:
+    st.stop()
 
-    # Create a chat input field to allow the user to enter a message. This will display
-    # automatically at the bottom of the page.
-    if prompt := st.chat_input("What is up?"):
+# Mostrar vista previa
+st.subheader("📊 Vista previa del dataset")
+st.dataframe(df.head(100))
 
-        # Store and display the current prompt.
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+# Estado del chat
+if "messages" not in st.session_state:
+    # Mensaje del sistema con contexto del dataset
+    df_context = df.head(100).to_string()
+    st.session_state.messages = [
+        {
+            "role": "system",
+            "content": "Eres un analista de datos. Solo debes responder preguntas relacionadas con el siguiente dataset:\n\n"
+                       + df_context +
+                       "\n\nSi la pregunta no tiene relación con los datos, responde: 'Por ahora solo me centro en responder preguntas del dataset'."
+        }
+    ]
 
-        # Generate a response using the OpenAI API.
+# Mostrar historial del chat
+for msg in st.session_state.messages[1:]:  # omitimos el system
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+# Entrada de chat
+if prompt := st.chat_input("Haz una pregunta sobre el dataset..."):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    try:
+        # Respuesta del modelo
         stream = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": m["role"], "content": m["content"]}
-                for m in st.session_state.messages
-            ],
-            stream=True,
+            model="gpt-4-turbo",
+            messages=st.session_state.messages,
+            stream=True
         )
 
-        # Stream the response to the chat using `st.write_stream`, then store it in 
-        # session state.
+        # Mostrar y guardar respuesta
         with st.chat_message("assistant"):
             response = st.write_stream(stream)
         st.session_state.messages.append({"role": "assistant", "content": response})
+
+    except Exception as e:
+        st.error(f"❌ Error al consultar la API: {e}")
